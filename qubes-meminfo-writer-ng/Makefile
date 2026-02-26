@@ -9,6 +9,14 @@ CARGO_FLAGS = --release
 CARGO_TARGET = release
 endif
 
+# Build offline using crates installed by DNF/APT (from /usr/share/cargo/registry).
+# The .cargo/config.toml in this directory configures cargo to use that system
+# registry.  Set ONLINE=1 to allow fetching from crates.io (for development on
+# machines that do not have the system crate packages installed).
+ifndef ONLINE
+CARGO_FLAGS += --offline
+endif
+
 BINARY = target/$(CARGO_TARGET)/qubes-meminfo-writer-ng
 
 .PHONY: all install clean check
@@ -19,7 +27,7 @@ $(BINARY): src/main.rs src/xenstore.rs Cargo.toml
 	cargo build $(CARGO_FLAGS)
 
 check:
-	cargo test --no-default-features
+	cargo test --no-default-features --offline
 
 install: $(BINARY)
 	install -D $(BINARY) $(DESTDIR)/$(BINDIR)/qubes-meminfo-writer-ng
