@@ -1,0 +1,12 @@
+[package]
+name = "qubes-meminfo-writer-ng"
+version = "0.1.0"
+edition = "2021"
+description = "Qubes memory information reporter (Rust rewrite)"
+license = "GPL-2.0-only"
+
+[dependencies]
+sysinfo = { version = "0.34", default-features = false, features = ["system"] }
+
+[profile.release]
+strip = true
