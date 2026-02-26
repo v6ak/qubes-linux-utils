@@ -15,10 +15,7 @@ default = ["xenstore"]
 xenstore = []
 
 [dependencies]
-sysinfo = { version = "0.34", default-features = false, features = ["system"] }
-
-[dev-dependencies]
-tempfile = "3"
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 
 [profile.release]
 strip = true

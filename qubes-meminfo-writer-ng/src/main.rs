@@ -369,6 +369,33 @@ fn main() {
 mod tests {
     use super::*;
 
+    // Minimal RAII temp-file helper so tests do not depend on the `tempfile`
+    // crate (which may not be packaged by the distribution).
+    struct TempFile {
+        path: std::path::PathBuf,
+    }
+    impl TempFile {
+        fn new(content: &str) -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "qubes-meminfo-test-{}-{}.conf",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::Relaxed),
+            ));
+            std::fs::write(&path, content).expect("write temp config");
+            TempFile { path }
+        }
+        fn path_str(&self) -> &str {
+            self.path.to_str().expect("temp path is valid UTF-8")
+        }
+    }
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
     fn make_swap(total_kb: u64, used_kb: u64) -> SwapEntry {
         SwapEntry {
             filename: "/dev/test".into(),
@@ -451,24 +478,16 @@ mod tests {
 
     #[test]
     fn test_parse_config_values() {
-        use std::io::Write;
-        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
-        writeln!(tmp, "# comment").unwrap();
-        writeln!(tmp, "THRESHOLD=50000").unwrap();
-        writeln!(tmp, "DELAY=200000").unwrap();
-        writeln!(tmp, "UNKNOWN=ignored").unwrap();
-        let cfg = parse_config(tmp.path().to_str().unwrap());
+        let tmp = TempFile::new("# comment\nTHRESHOLD=50000\nDELAY=200000\nUNKNOWN=ignored\n");
+        let cfg = parse_config(tmp.path_str());
         assert_eq!(cfg.threshold_kb, 50_000);
         assert_eq!(cfg.delay_us, 200_000);
     }
 
     #[test]
     fn test_parse_config_bad_values_use_defaults() {
-        use std::io::Write;
-        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
-        writeln!(tmp, "THRESHOLD=notanumber").unwrap();
-        writeln!(tmp, "DELAY=0").unwrap(); // 0 is invalid (must be positive)
-        let cfg = parse_config(tmp.path().to_str().unwrap());
+        let tmp = TempFile::new("THRESHOLD=notanumber\nDELAY=0\n");
+        let cfg = parse_config(tmp.path_str());
         assert_eq!(cfg.threshold_kb, DEFAULT_THRESHOLD_KB);
         assert_eq!(cfg.delay_us, DEFAULT_DELAY_US);
     }
