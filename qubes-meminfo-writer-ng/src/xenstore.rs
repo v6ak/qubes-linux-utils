@@ -69,7 +69,7 @@ impl XsHandle {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "xenstore support was not compiled in \
-             (libxenstore not found at build time); use --debug mode",
+             (libxenstore not found at build time); use --output print",
         ))
     }
 
