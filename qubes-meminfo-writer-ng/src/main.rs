@@ -9,8 +9,10 @@
 // Xen domain the RAM total can optionally be overridden by the value reported
 // by the Xen balloon driver (current_kb).
 //
-// In --debug mode the program prints the computed values to stdout without
-// writing to xenstore, which is useful for testing on non-Xen machines.
+// Runtime configuration (threshold, delay) is read from a configuration file
+// (default: /etc/qubes/meminfo-writer-ng.conf).  The only CLI flags are:
+//   --debug            print values to stdout; do not write to xenstore
+//   --config <path>    use an alternative configuration file
 
 mod xenstore;
 
@@ -28,6 +30,13 @@ const XENSTORE_MEMINFO_PATH: &str = "memory/meminfo";
 // Path to the Xen balloon driver's view of current memory in kB.
 const XEN_CURRENT_KB_PATH: &str =
     "/sys/devices/system/xen_memory/xen_memory0/info/current_kb";
+
+// Default path to the configuration file.
+const DEFAULT_CONFIG_PATH: &str = "/etc/qubes/meminfo-writer-ng.conf";
+
+// Built-in defaults used when a key is absent from the config file.
+const DEFAULT_THRESHOLD_KB: u64 = 30_000;
+const DEFAULT_DELAY_US: u64 = 100_000;
 
 // ── Swap information ──────────────────────────────────────────────────────────
 
@@ -146,13 +155,79 @@ fn should_update(
     false
 }
 
-// ── CLI ───────────────────────────────────────────────────────────────────────
+// ── Configuration file ────────────────────────────────────────────────────────
 
+/// Settings loaded from the configuration file.
 struct Config {
     /// Minimum memory change (in kB) that triggers a xenstore write.
     threshold_kb: u64,
     /// Sleep interval between updates in microseconds.
     delay_us: u64,
+}
+
+/// Parse the configuration file at `path`.
+///
+/// The file format is simple `KEY=VALUE` pairs, one per line.  Lines starting
+/// with `#` (after optional leading whitespace) and blank lines are ignored.
+/// Unknown keys are also ignored so that future versions can add new settings
+/// without breaking older binaries.
+///
+/// Recognised keys:
+///   THRESHOLD   – memory change threshold in kB (positive integer)
+///   DELAY       – update interval in microseconds (positive integer)
+fn parse_config(path: &str) -> Config {
+    let mut threshold_kb = DEFAULT_THRESHOLD_KB;
+    let mut delay_us = DEFAULT_DELAY_US;
+
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("warning: could not read config file {path}: {e}; using defaults");
+            return Config { threshold_kb, delay_us };
+        }
+    };
+
+    for (line_index, line) in content.lines().enumerate() {
+        let line = line.trim();
+        // Skip blank lines and comments.
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            eprintln!("warning: {path}:{}: malformed line (expected KEY=VALUE)", line_index + 1);
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+
+        match key {
+            "THRESHOLD" => match value.parse::<u64>() {
+                Ok(v) if v > 0 => threshold_kb = v,
+                _ => eprintln!(
+                    "warning: {path}:{}: THRESHOLD must be a positive integer; using default",
+                    line_index + 1
+                ),
+            },
+            "DELAY" => match value.parse::<u64>() {
+                Ok(v) if v > 0 => delay_us = v,
+                _ => eprintln!(
+                    "warning: {path}:{}: DELAY must be a positive integer; using default",
+                    line_index + 1
+                ),
+            },
+            // Silently ignore unknown keys for forward compatibility.
+            _ => {}
+        }
+    }
+
+    Config { threshold_kb, delay_us }
+}
+
+// ── CLI ───────────────────────────────────────────────────────────────────────
+
+struct CliArgs {
+    /// Path to the configuration file.
+    config_path: String,
     /// When true, print computed values to stdout instead of writing xenstore.
     debug: bool,
 }
@@ -161,40 +236,31 @@ fn print_usage(prog: &str) {
     eprintln!("Usage: {prog} [OPTIONS]");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --threshold <KB>   Memory change threshold in kB  [default: 30000]");
-    eprintln!("  --delay <US>       Update interval in microseconds [default: 100000]");
+    eprintln!("  --config <path>    Configuration file [default: {DEFAULT_CONFIG_PATH}]");
     eprintln!("  --debug            Print values to stdout; do not write to xenstore");
     eprintln!("  --help, -h         Show this message");
+    eprintln!();
+    eprintln!("Configuration file keys (KEY=VALUE format):");
+    eprintln!("  THRESHOLD          Memory change threshold in kB [default: {DEFAULT_THRESHOLD_KB}]");
+    eprintln!("  DELAY              Update interval in microseconds [default: {DEFAULT_DELAY_US}]");
 }
 
-fn parse_args() -> Config {
+fn parse_args() -> CliArgs {
     let args: Vec<String> = std::env::args().collect();
     let prog = args.first().map(String::as_str).unwrap_or("qubes-meminfo-writer-ng");
 
-    let mut threshold_kb: u64 = 30_000;
-    let mut delay_us: u64 = 100_000;
+    let mut config_path = DEFAULT_CONFIG_PATH.to_string();
     let mut debug = false;
 
     let mut i = 1usize;
     while i < args.len() {
         match args[i].as_str() {
-            "--threshold" => {
+            "--config" => {
                 i += 1;
-                match args.get(i).and_then(|s| s.parse().ok()) {
-                    Some(v) if v > 0 => threshold_kb = v,
-                    _ => {
-                        eprintln!("error: --threshold requires a positive integer");
-                        print_usage(prog);
-                        process::exit(1);
-                    }
-                }
-            }
-            "--delay" => {
-                i += 1;
-                match args.get(i).and_then(|s| s.parse().ok()) {
-                    Some(v) if v > 0 => delay_us = v,
-                    _ => {
-                        eprintln!("error: --delay requires a positive integer");
+                match args.get(i) {
+                    Some(p) => config_path = p.clone(),
+                    None => {
+                        eprintln!("error: --config requires a path argument");
                         print_usage(prog);
                         process::exit(1);
                     }
@@ -214,20 +280,17 @@ fn parse_args() -> Config {
         i += 1;
     }
 
-    Config {
-        threshold_kb,
-        delay_us,
-        debug,
-    }
+    CliArgs { config_path, debug }
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
 
 fn main() {
-    let cfg = parse_args();
+    let cli = parse_args();
+    let cfg = parse_config(&cli.config_path);
 
     // Open xenstore unless we are in debug mode.
-    let xs = if cfg.debug {
+    let xs = if cli.debug {
         None
     } else {
         match xenstore::XsHandle::open() {
@@ -264,7 +327,7 @@ fn main() {
         let used_mem_kb =
             compute_used_memory(total_memory_kb, available_memory_kb, xen_current_kb, &swap_entries);
 
-        if cfg.debug {
+        if cli.debug {
             println!(
                 "total_mem={total_memory_kb}kB \
                  available_mem={available_memory_kb}kB \
@@ -286,7 +349,7 @@ fn main() {
             prev_used_mem_kb = used_mem_kb;
             let data = used_mem_kb.to_string();
 
-            if cfg.debug {
+            if cli.debug {
                 println!("xenstore write: {XENSTORE_MEMINFO_PATH}={data}");
             } else if let Some(ref h) = xs {
                 if let Err(e) = h.write(XENSTORE_MEMINFO_PATH, &data) {
@@ -376,5 +439,37 @@ mod tests {
                 assert!(e.used_kb <= e.total_kb, "used ≤ total for {}", e.filename);
             }
         }
+    }
+
+    #[test]
+    fn test_parse_config_defaults() {
+        // With a non-existent file the defaults are returned without panic.
+        let cfg = parse_config("/nonexistent/path/config.conf");
+        assert_eq!(cfg.threshold_kb, DEFAULT_THRESHOLD_KB);
+        assert_eq!(cfg.delay_us, DEFAULT_DELAY_US);
+    }
+
+    #[test]
+    fn test_parse_config_values() {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        writeln!(tmp, "# comment").unwrap();
+        writeln!(tmp, "THRESHOLD=50000").unwrap();
+        writeln!(tmp, "DELAY=200000").unwrap();
+        writeln!(tmp, "UNKNOWN=ignored").unwrap();
+        let cfg = parse_config(tmp.path().to_str().unwrap());
+        assert_eq!(cfg.threshold_kb, 50_000);
+        assert_eq!(cfg.delay_us, 200_000);
+    }
+
+    #[test]
+    fn test_parse_config_bad_values_use_defaults() {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        writeln!(tmp, "THRESHOLD=notanumber").unwrap();
+        writeln!(tmp, "DELAY=0").unwrap(); // 0 is invalid (must be positive)
+        let cfg = parse_config(tmp.path().to_str().unwrap());
+        assert_eq!(cfg.threshold_kb, DEFAULT_THRESHOLD_KB);
+        assert_eq!(cfg.delay_us, DEFAULT_DELAY_US);
     }
 }

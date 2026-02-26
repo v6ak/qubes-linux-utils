@@ -2,7 +2,7 @@ BINDIR ?= /usr/bin
 
 # Build in release mode by default; can be overridden with DEBUG=1.
 ifdef DEBUG
-CARGO_FLAGS =
+CARGO_FLAGS = --no-default-features
 CARGO_TARGET = debug
 else
 CARGO_FLAGS = --release
@@ -19,10 +19,12 @@ $(BINARY): src/main.rs src/xenstore.rs Cargo.toml
 	cargo build $(CARGO_FLAGS)
 
 check:
-	cargo test $(CARGO_FLAGS)
+	cargo test --no-default-features
 
 install: $(BINARY)
 	install -D $(BINARY) $(DESTDIR)/$(BINDIR)/qubes-meminfo-writer-ng
+	install -D -m 0644 meminfo-writer-ng.conf \
+		$(DESTDIR)/etc/qubes/meminfo-writer-ng.conf
 ifeq (1,${DEBIANBUILD})
 	install -d $(DESTDIR)/lib/systemd/system/
 	install -m 0644 qubes-meminfo-writer-ng.service \
