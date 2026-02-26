@@ -548,13 +548,17 @@ fn main() {
             }
         }
 
-        if should_update(used_mem_kb, prev_used_mem_kb, cfg.threshold_kb, total_memory_kb) {
-            prev_used_mem_kb = used_mem_kb;
-            let data = used_mem_kb.to_string();
-
-            if use_print {
+        let data = used_mem_kb.to_string();
+        let will_write = should_update(used_mem_kb, prev_used_mem_kb, cfg.threshold_kb, total_memory_kb);
+        if use_print {
+            if will_write {
                 println!("xenstore write: {XENSTORE_MEMINFO_PATH}={data}");
+            } else {
+                println!("xenstore skipped (threshold): {XENSTORE_MEMINFO_PATH}={data}");
             }
+        }
+        if will_write {
+            prev_used_mem_kb = used_mem_kb;
             if let Some(ref h) = xs {
                 if let Err(e) = h.write(XENSTORE_MEMINFO_PATH, &data) {
                     eprintln!("error: xenstore write failed: {e}");
