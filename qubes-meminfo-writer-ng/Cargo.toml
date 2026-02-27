@@ -16,6 +16,8 @@ xenstore = []
 
 [dependencies]
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [profile.release]
 strip = true

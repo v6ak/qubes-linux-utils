@@ -3,10 +3,10 @@ BINDIR ?= /usr/bin
 # Required build dependencies
 # ────────────────────────────
 # Fedora:
-#   dnf install rust cargo rust-sysinfo+system-devel libxen-devel
+#   dnf install rust cargo rust-sysinfo+system-devel rust-serde+derive-devel rust-toml+devel libxen-devel
 #
 # Debian/Ubuntu:
-#   apt-get install rustc cargo librust-sysinfo-dev libxen-dev
+#   apt-get install rustc cargo librust-sysinfo-dev librust-serde+derive-dev librust-toml-dev libxen-dev
 #
 # The sysinfo crate package must provide sysinfo >= 0.37.  On Fedora the RPM
 # is named rust-sysinfo+system-devel; the equivalent Debian package name may
@@ -36,7 +36,9 @@ BINARY = target/$(CARGO_TARGET)/qubes-meminfo-writer-ng
 
 all: $(BINARY)
 
-$(BINARY): src/main.rs src/xenstore.rs Cargo.toml
+RUST_SOURCES = $(wildcard src/*.rs)
+
+$(BINARY): $(RUST_SOURCES) Cargo.toml
 	cargo build $(CARGO_FLAGS)
 
 check:
