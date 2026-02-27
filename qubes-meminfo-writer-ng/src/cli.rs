@@ -28,6 +28,9 @@ pub struct CliArgs {
     pub config_path: String,
     /// Selected output mode.
     pub output_mode: OutputMode,
+    /// When `true`, run exactly one sampling iteration then exit.
+    /// Useful for scripting, debugging, and integration testing.
+    pub once: bool,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -41,6 +44,7 @@ pub fn print_usage(prog: &str) {
     eprintln!("    print                Print computed values to stdout; no xenstore writes");
     eprintln!("    xenstore             Write to xenstore only (silent)");
     eprintln!("    both                 Write to xenstore and print to stdout");
+    eprintln!("  --once                 Run one iteration and exit (useful for debugging)");
     eprintln!("  --help, -h             Show this message");
     eprintln!();
     eprintln!("Configuration file (TOML) keys:");
@@ -58,6 +62,7 @@ pub fn parse_args() -> CliArgs {
 
     let mut config_path = DEFAULT_CONFIG_PATH.to_string();
     let mut output_mode = OutputMode::Xenstore;
+    let mut once = false;
 
     let mut i = 1usize;
     while i < args.len() {
@@ -94,6 +99,7 @@ pub fn parse_args() -> CliArgs {
                     }
                 }
             }
+            "--once" => once = true,
             "--help" | "-h" => {
                 print_usage(prog);
                 process::exit(0);
@@ -107,5 +113,5 @@ pub fn parse_args() -> CliArgs {
         i += 1;
     }
 
-    CliArgs { config_path, output_mode }
+    CliArgs { config_path, output_mode, once }
 }

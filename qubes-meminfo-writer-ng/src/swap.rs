@@ -1,9 +1,6 @@
-// /proc/swaps parsing and per-swap-entry weight application.
+// /proc/swaps parsing.
 
 use std::{fs, io};
-
-use crate::config::SwapWeightRule;
-use crate::config::swap_weight;
 
 // ── SwapEntry ─────────────────────────────────────────────────────────────────
 
@@ -53,20 +50,6 @@ pub fn read_swap_entries() -> io::Result<Vec<SwapEntry>> {
     fs::read_to_string("/proc/swaps").map(|c| parse_swap_content(&c))
 }
 
-// ── Weight computation ────────────────────────────────────────────────────────
-
-/// Compute the total weighted used-swap in kB.
-///
-/// Each entry's used-kB is multiplied by the weight of the first matching rule
-/// from `rules`.  Entries with no matching rule are counted at full weight
-/// (multiplier 1.0).
-pub fn weighted_swap_used_kb(entries: &[SwapEntry], rules: &[SwapWeightRule]) -> u64 {
-    entries
-        .iter()
-        .map(|e| (e.used_kb as f64 * swap_weight(&e.filename, rules)) as u64)
-        .sum()
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -76,6 +59,15 @@ mod tests {
 
     fn make_rule(glob: &str, weight: f64) -> SwapWeightRule {
         SwapWeightRule { glob: glob.into(), weight }
+    }
+
+    /// Compute the total weighted used-swap in kB.  Used only in tests.
+    fn weighted_swap_used_kb(entries: &[SwapEntry], rules: &[SwapWeightRule]) -> u64 {
+        use crate::config::swap_weight;
+        entries
+            .iter()
+            .map(|e| (e.used_kb as f64 * swap_weight(&e.filename, rules)) as u64)
+            .sum()
     }
 
     // ── parse_swap_content ────────────────────────────────────────────────────

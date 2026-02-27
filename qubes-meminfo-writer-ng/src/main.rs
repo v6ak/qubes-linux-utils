@@ -22,7 +22,7 @@ use std::time::Duration;
 use sysinfo::System;
 
 use cli::OutputMode;
-use config::swap_weight;
+use config::WeightCache;
 use mem::{compute_used_memory, read_xen_current_kb, should_update};
 use swap::read_swap_entries;
 
@@ -52,6 +52,11 @@ fn main() {
     let mut sys = System::new();
     let mut prev_used_mem_kb: u64 = 0;
 
+    // Glob rules are static after startup.  WeightCache ensures each unique
+    // swap device path is matched against the rules at most once over the
+    // lifetime of the process, rather than on every sampling tick.
+    let mut weight_cache = WeightCache::new(cfg.swap);
+
     loop {
         sys.refresh_memory();
 
@@ -68,12 +73,10 @@ fn main() {
             }
         };
 
-        // Pre-compute per-entry weights once so they can be used for both the
-        // weighted total and the per-entry debug output without a second lookup.
-        let entry_weights: Vec<f64> = swap_entries
-            .iter()
-            .map(|e| swap_weight(&e.filename, &cfg.swap))
-            .collect();
+        // Resolve weights via cache: glob matching runs at most once per unique
+        // swap device path, even across thousands of sampling ticks.
+        let entry_weights: Vec<f64> =
+            swap_entries.iter().map(|e| weight_cache.get(&e.filename)).collect();
         let swap_used_kb_weighted: u64 = swap_entries
             .iter()
             .zip(&entry_weights)
@@ -124,6 +127,9 @@ fn main() {
             }
         }
 
+        if cli.once {
+            break;
+        }
         thread::sleep(Duration::from_micros(cfg.delay_us));
     }
 }

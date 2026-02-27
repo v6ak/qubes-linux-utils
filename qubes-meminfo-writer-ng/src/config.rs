@@ -11,6 +11,7 @@
 //     glob        – shell glob pattern for the swap device/file path
 //     weight      – non-negative float multiplier for used-kB
 
+use std::collections::HashMap;
 use std::fs;
 
 use serde::Deserialize;
@@ -40,6 +41,40 @@ pub fn swap_weight(filename: &str, rules: &[SwapWeightRule]) -> f64 {
         .find(|r| glob_matches(&r.glob, filename))
         .map(|r| r.weight)
         .unwrap_or(1.0)
+}
+
+// ── WeightCache ───────────────────────────────────────────────────────────────
+
+/// Lazily-populated cache that maps swap device paths to their configured weights.
+///
+/// The swap rules (glob patterns) are static after startup.  Swap device paths
+/// rarely change after boot.  By caching the first glob-match result for each
+/// path, glob evaluation is amortised to **once per unique device path** over
+/// the process lifetime rather than once per sampling tick.
+pub struct WeightCache {
+    rules: Vec<SwapWeightRule>,
+    cache: HashMap<String, f64>,
+}
+
+impl WeightCache {
+    /// Create a new cache backed by `rules`.
+    pub fn new(rules: Vec<SwapWeightRule>) -> Self {
+        WeightCache { rules, cache: HashMap::new() }
+    }
+
+    /// Return the weight for `filename`.
+    ///
+    /// On the first call for any given path the glob rules are evaluated and
+    /// the result is stored; subsequent calls for the same path return the
+    /// cached value without touching the rules at all.
+    pub fn get(&mut self, filename: &str) -> f64 {
+        if let Some(&w) = self.cache.get(filename) {
+            return w;
+        }
+        let w = swap_weight(filename, &self.rules);
+        self.cache.insert(filename.to_string(), w);
+        w
+    }
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -273,5 +308,49 @@ mod tests {
         assert_eq!(cfg.threshold_kb, 10_000);
         // tmp is dropped (may have parse errors – that's fine, just a sanity check)
         let _ = tmp;
+    }
+
+    // ── WeightCache ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_weight_cache_returns_correct_weights() {
+        let rules = vec![
+            SwapWeightRule { glob: "/dev/zram*".into(), weight: 0.5 },
+            SwapWeightRule { glob: "*".into(), weight: 1.0 },
+        ];
+        let mut cache = WeightCache::new(rules);
+        assert_eq!(cache.get("/dev/zram0"), 0.5);
+        assert_eq!(cache.get("/dev/sda2"), 1.0);
+    }
+
+    #[test]
+    fn test_weight_cache_no_rules_defaults_to_one() {
+        let mut cache = WeightCache::new(vec![]);
+        assert_eq!(cache.get("/dev/sda2"), 1.0);
+    }
+
+    #[test]
+    fn test_weight_cache_repeated_lookup_is_consistent() {
+        // Second lookup for the same path must return the same value (cached).
+        let rules = vec![SwapWeightRule { glob: "/dev/zram*".into(), weight: 0.25 }];
+        let mut cache = WeightCache::new(rules);
+        let first = cache.get("/dev/zram0");
+        let second = cache.get("/dev/zram0"); // cached path
+        assert_eq!(first, second);
+        assert_eq!(first, 0.25);
+    }
+
+    #[test]
+    fn test_weight_cache_different_paths_independent() {
+        let rules = vec![
+            SwapWeightRule { glob: "/dev/zram*".into(), weight: 0.5 },
+            SwapWeightRule { glob: "*".into(), weight: 1.0 },
+        ];
+        let mut cache = WeightCache::new(rules);
+        // Interleave lookups to ensure the cache doesn't confuse paths.
+        assert_eq!(cache.get("/dev/zram0"), 0.5);
+        assert_eq!(cache.get("/dev/sda2"), 1.0);
+        assert_eq!(cache.get("/dev/zram1"), 0.5); // different zram device, same rule
+        assert_eq!(cache.get("/dev/sda2"), 1.0); // already cached
     }
 }
