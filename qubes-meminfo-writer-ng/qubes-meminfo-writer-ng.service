@@ -1,0 +1,12 @@
+[Unit]
+Description=Qubes memory information reporter (ng)
+ConditionPathExists=/run/qubes-service/meminfo-writer
+Before=systemd-user-sessions.service
+Conflicts=qubes-meminfo-writer.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/qubes-meminfo-writer-ng
+
+[Install]
+WantedBy=multi-user.target

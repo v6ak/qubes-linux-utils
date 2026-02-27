@@ -1,0 +1,13 @@
+[Unit]
+Description=Qubes memory information reporter (ng)
+Before=systemd-user-sessions.service
+After=qubes-core.service qubes-qmemman.service
+ConditionPathExists=/run/qubes/qmemman.sock
+Conflicts=qubes-meminfo-writer-dom0.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/qubes-meminfo-writer-ng
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+[package]
+name = "qubes-meminfo-writer-ng"
+version = "0.1.0"
+edition = "2021"
+description = "Qubes memory information reporter (Rust rewrite)"
+license = "GPL-2.0-only"
+
+[features]
+# Build with xenstore support (links libxenstore).  Enabled by default so that
+# a plain `cargo build` in a Qubes build environment (xen-devel / libxen-dev
+# installed) produces a fully functional binary.  Disable with
+# `--no-default-features` to build without xenstore for testing on non-Xen
+# machines.
+default = ["xenstore"]
+xenstore = []
+
+[dependencies]
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+
+[profile.release]
+strip = true

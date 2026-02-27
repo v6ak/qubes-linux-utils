@@ -1,0 +1,15 @@
+# Use crates installed by the system package manager (DNF/APT) instead of
+# fetching from crates.io.  In a Qubes/Fedora build environment the required
+# crates are provided as RPMs (e.g. rust-sysinfo+system-devel); on Debian/
+# Ubuntu they are provided as Debian packages.  Both install to the same path:
+#   /usr/share/cargo/registry/
+#
+# When building for development on a machine where these system packages are
+# not installed, override CARGO_HOME to bypass this configuration:
+#   CARGO_HOME=$HOME/.cargo cargo build --features xenstore
+
+[source.crates-io]
+replace-with = "system-crates"
+
+[source.system-crates]
+directory = "/usr/share/cargo/registry"
