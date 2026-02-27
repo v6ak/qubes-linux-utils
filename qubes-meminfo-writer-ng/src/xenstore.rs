@@ -47,10 +47,6 @@ pub struct XsHandle {
     handle: *mut c_void,
 }
 
-// SAFETY: The xenstore handle is not thread-safe in general, but we only use
-// it from a single thread (the main loop), so Send is acceptable here.
-unsafe impl Send for XsHandle {}
-
 impl XsHandle {
     /// Open a xenstore handle.  Returns an error if xenstore is not accessible
     /// or if the binary was compiled without xenstore support.
